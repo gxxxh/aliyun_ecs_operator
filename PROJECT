@@ -1,0 +1,16 @@
+domain: doslab.io
+layout:
+- go.kubebuilder.io/v3
+projectName: cloudoperator
+repo: cloudOperator
+resources:
+- api:
+    crdVersion: v1
+    namespaced: true
+  controller: true
+  domain: doslab.io
+  group: aliyun.ecs
+  kind: VMInstance
+  path: cloudOperator/api/v1
+  version: v1
+version: "3"

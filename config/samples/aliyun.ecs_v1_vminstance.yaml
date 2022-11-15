@@ -1,0 +1,12 @@
+apiVersion: aliyun.ecs.doslab.io/v1
+kind: VMInstance
+metadata:
+  labels:
+    app.kubernetes.io/name: vminstance
+    app.kubernetes.io/instance: vminstance-sample
+    app.kubernetes.io/part-of: cloudoperator
+    app.kuberentes.io/managed-by: kustomize
+    app.kubernetes.io/created-by: cloudoperator
+  name: vminstance-sample
+spec:
+  # TODO(user): Add fields here
