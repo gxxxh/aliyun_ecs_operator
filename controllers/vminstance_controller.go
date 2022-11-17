@@ -17,25 +17,30 @@ limitations under the License.
 package controllers
 
 import (
+	aliyunecsv1 "cloudOperator/api/v1"
 	"context"
-
+	"fmt"
+	"github.com/go-logr/logr"
+	"github.com/pkg/errors"
+	corev1 "k8s.io/api/core/v1"
+	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/log"
-
-	aliyunecsv1 "cloudOperator/api/v1"
 )
 
 // VMInstanceReconciler reconciles a VMInstance object
 type VMInstanceReconciler struct {
 	client.Client
+	Log    logr.Logger
 	Scheme *runtime.Scheme
 }
 
 //+kubebuilder:rbac:groups=aliyun.ecs.doslab.io,resources=vminstances,verbs=get;list;watch;create;update;patch;delete
 //+kubebuilder:rbac:groups=aliyun.ecs.doslab.io,resources=vminstances/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=aliyun.ecs.doslab.io,resources=vminstances/finalizers,verbs=update
+//+kubebuilder:rbac:groups=,resources=secrets,verbs=get;list;
 
 // Reconcile is part of the main kubernetes reconciliation loop which aims to
 // move the current state of the cluster closer to the desired state.
@@ -47,10 +52,73 @@ type VMInstanceReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *VMInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	_ = log.FromContext(ctx)
-
+	logger := log.FromContext(ctx, "aliyunECS", req.NamespacedName)
 	// TODO(user): your logic here
+	//获取对象
+	var (
+		err error
+	)
+	inst := &aliyunecsv1.VMInstance{}
+	if err = r.Get(ctx, req.NamespacedName, inst); err != nil {
+		if apierrors.IsNotFound(err) {
+			return ctrl.Result{}, nil
+		}
+		logger.Error(err, "Get Virtual machine error")
+		return ctrl.Result{}, err
+	}
+	//get secrets and init Service
+	secret := &corev1.Secret{}
+	if err = r.Get(ctx, client.ObjectKey{
+		Namespace: inst.Spec.SecretRef.Namespace,
+		Name:      inst.Spec.SecretRef.Name,
+	}, secret); err != nil {
+		if apierrors.IsNotFound(err) {
+			logger.Error(err, "Not found secret to the cloud")
+			return ctrl.Result{}, err
+		}
+		logger.Error(err, "Get Secret Error")
+		return ctrl.Result{}, err
+	}
 
+	//init a executor to execute request
+	executor, err := NewExecutor(inst.Kind, secret.Data)
+	if err != nil {
+		logger.Error(err, "Init executor error")
+		return ctrl.Result{}, err
+	}
+
+	// 无需处理
+	if inst.Spec.LifeCycle.Raw == nil || (inst.Spec.LifeCycle.Raw != nil && len(inst.Spec.LifeCycle.Raw) == 0) {
+		if inst.Spec.Domain.Raw == nil || (inst.Spec.Domain.Raw != nil && len(inst.Spec.LifeCycle.Raw) == 0) {
+			//init
+			domain, err := executor.GetDomain(inst.Spec)
+			if err != nil {
+				logger.Error(err, fmt.Sprintf("Get Domain info for %s error\n", inst.Kind))
+			}
+			inst.Spec.Domain.Raw = domain
+		}
+		logger.Info("Instance lifecycle is empty", "Instance", inst)
+		return ctrl.Result{}, nil
+	}
+	
+	//todo 执行结果写入到event中
+	_, err = executor.ServiceCall(inst.Spec.LifeCycle.Raw)
+	if err != nil {
+		logger.Error(err, "call Cloud API Error")
+		return ctrl.Result{}, err
+	}
+	// update
+	inst.Spec.LifeCycle.Raw = nil
+	domain, err := executor.GetDomain(inst.Spec)
+	if err != nil {
+		logger.Error(err, fmt.Sprintf("Get Domain info for %s error\n", inst.Kind))
+	}
+	inst.Spec.Domain.Raw = domain
+	// write back
+	if err := r.Update(ctx, inst); err != nil {
+		return ctrl.Result{}, errors.Wrap(err, "Update")
+	}
+	//todo 删除资源时，调用删除？
 	return ctrl.Result{}, nil
 }
 

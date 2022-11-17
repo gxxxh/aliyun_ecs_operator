@@ -1,0 +1,38 @@
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  creationTimestamp: null
+  name: manager-role
+rules:
+- resources:
+  - secrets
+  verbs:
+  - get
+  - list
+- apiGroups:
+  - aliyun.ecs.doslab.io
+  resources:
+  - vminstances
+  verbs:
+  - create
+  - delete
+  - get
+  - list
+  - patch
+  - update
+  - watch
+- apiGroups:
+  - aliyun.ecs.doslab.io
+  resources:
+  - vminstances/finalizers
+  verbs:
+  - update
+- apiGroups:
+  - aliyun.ecs.doslab.io
+  resources:
+  - vminstances/status
+  verbs:
+  - get
+  - patch
+  - update
