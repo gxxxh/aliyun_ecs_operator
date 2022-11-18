@@ -16,7 +16,7 @@ rules:
   - vminstances
   verbs:
   - create
-  - delete
+  - delete.json
   - get
   - list
   - patch

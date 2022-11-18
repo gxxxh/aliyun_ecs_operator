@@ -25,19 +25,21 @@ import (
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
+	"k8s.io/apimachinery/pkg/types"
+	"k8s.io/client-go/tools/record"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
-	"sigs.k8s.io/controller-runtime/pkg/log"
 )
 
 // VMInstanceReconciler reconciles a VMInstance object
 type VMInstanceReconciler struct {
 	client.Client
-	Log    logr.Logger
-	Scheme *runtime.Scheme
+	Log      logr.Logger
+	Scheme   *runtime.Scheme
+	Recorder record.EventRecorder
 }
 
-//+kubebuilder:rbac:groups=aliyun.ecs.doslab.io,resources=vminstances,verbs=get;list;watch;create;update;patch;delete
+//+kubebuilder:rbac:groups=aliyun.ecs.doslab.io,resources=vminstances,verbs=get;list;watch;create;update;patch;delete.json
 //+kubebuilder:rbac:groups=aliyun.ecs.doslab.io,resources=vminstances/status,verbs=get;update;patch
 //+kubebuilder:rbac:groups=aliyun.ecs.doslab.io,resources=vminstances/finalizers,verbs=update
 //+kubebuilder:rbac:groups=,resources=secrets,verbs=get;list;
@@ -52,7 +54,7 @@ type VMInstanceReconciler struct {
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
 func (r *VMInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
-	logger := log.FromContext(ctx, "aliyunECS", req.NamespacedName)
+	logger := r.Log
 	// TODO(user): your logic here
 	//获取对象
 	var (
@@ -88,37 +90,52 @@ func (r *VMInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	// 无需处理
-	if inst.Spec.LifeCycle.Raw == nil || (inst.Spec.LifeCycle.Raw != nil && len(inst.Spec.LifeCycle.Raw) == 0) {
-		if inst.Spec.Domain.Raw == nil || (inst.Spec.Domain.Raw != nil && len(inst.Spec.LifeCycle.Raw) == 0) {
+	if (inst.Spec.LifeCycle.Raw == nil) || (inst.Spec.LifeCycle.Raw != nil && len(inst.Spec.LifeCycle.Raw) == 0) {
+		if (inst.Spec.Domain.Raw == nil) || (inst.Spec.Domain.Raw != nil && len(inst.Spec.Domain.Raw) == 0) {
 			//init
 			domain, err := executor.GetDomain(inst.Spec)
 			if err != nil {
 				logger.Error(err, fmt.Sprintf("Get Domain info for %s error\n", inst.Kind))
 			}
 			inst.Spec.Domain.Raw = domain
+			logger.Info("Add Instance to kubernetes cluster, ", "Instance:", types.NamespacedName{
+				Namespace: inst.Namespace,
+				Name:      inst.Name,
+			}.String())
+			r.Recorder.Event(inst, corev1.EventTypeNormal, "Add Instance to kubernetes cluster", inst.Kind)
 		}
-		logger.Info("Instance lifecycle is empty", "Instance", inst)
+		logger.Info("Instance lifecycle is empty", "Instance:", types.NamespacedName{
+			Namespace: inst.Namespace,
+			Name:      inst.Name,
+		}.String())
 		return ctrl.Result{}, nil
 	}
-	
+
 	//todo 执行结果写入到event中
-	_, err = executor.ServiceCall(inst.Spec.LifeCycle.Raw)
+	//todo 测试cloudAPI的err
+	resp, err := executor.ServiceCall(inst.Spec.LifeCycle.Raw)
 	if err != nil {
 		logger.Error(err, "call Cloud API Error")
+		r.Recorder.Event(inst, "Error", "Call Cloud API Error", err.Error())
 		return ctrl.Result{}, err
 	}
+	// succeed event
+	r.Recorder.Eventf(inst, corev1.EventTypeNormal, "Call Cloud API Succeed", "RequestInfo: %s, ResponseInfo: %s", string(inst.Spec.LifeCycle.Raw), string(resp))
 	// update
 	inst.Spec.LifeCycle.Raw = nil
 	domain, err := executor.GetDomain(inst.Spec)
 	if err != nil {
 		logger.Error(err, fmt.Sprintf("Get Domain info for %s error\n", inst.Kind))
+		r.Recorder.Event(inst, "Error", "Get Cloud Resource's metadata error", err.Error())
+		return ctrl.Result{}, errors.Wrap(err, "Get Domain")
 	}
 	inst.Spec.Domain.Raw = domain
 	// write back
 	if err := r.Update(ctx, inst); err != nil {
+		r.Recorder.Event(inst, "Error", "Update Resource's Domain error", err.Error())
 		return ctrl.Result{}, errors.Wrap(err, "Update")
 	}
-	//todo 删除资源时，调用删除？
+	//todo 删除资源时，调用删除
 	return ctrl.Result{}, nil
 }
 

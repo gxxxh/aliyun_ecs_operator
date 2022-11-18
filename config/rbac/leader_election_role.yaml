@@ -22,7 +22,7 @@ rules:
   - create
   - update
   - patch
-  - delete
+  - delete.json
 - apiGroups:
   - coordination.k8s.io
   resources:
@@ -34,7 +34,7 @@ rules:
   - create
   - update
   - patch
-  - delete
+  - delete.json
 - apiGroups:
   - ""
   resources:

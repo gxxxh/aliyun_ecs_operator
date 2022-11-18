@@ -1,0 +1,20 @@
+{
+  "apiVersion": "aliyun.ecs.doslab.io/v1",
+  "kind": "VMInstance",
+  "metadata": {
+    "name": "aliyun-vm"
+  },
+  "spec": {
+    "lifeCycle": {
+      "RebootInstance": {
+        "InstanceId": "i-2zegiq87g0txkt1bvrb5"
+      }
+    },
+    "regionId": "cn-beijing",
+    "instanceId": "i-2zegiq87g0txkt1bvrb5",
+    "secretRef":{
+      "namespace": "default",
+      "name": "aliyun-secret"
+    }
+  }
+}

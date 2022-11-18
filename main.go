@@ -90,8 +90,10 @@ func main() {
 	}
 
 	if err = (&controllers.VMInstanceReconciler{
-		Client: mgr.GetClient(),
-		Scheme: mgr.GetScheme(),
+		Client:   mgr.GetClient(),
+		Scheme:   mgr.GetScheme(),
+		Log:      ctrl.Log.WithName("Controllers").WithName("VMInstance"),
+		Recorder: mgr.GetEventRecorderFor("VMInstance"),
 	}).SetupWithManager(mgr); err != nil {
 		setupLog.Error(err, "unable to create controller", "controller", "VMInstance")
 		os.Exit(1)
