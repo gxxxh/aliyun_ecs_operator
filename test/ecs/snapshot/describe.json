@@ -1,0 +1,21 @@
+{
+  "apiVersion": "aliyun.ecs.doslab.io/v1",
+  "kind": "ECSSnapshot",
+  "metadata": {
+    "name": "aliyun-snapshot"
+  },
+  "spec": {
+    "lifeCycle": {
+      "DescribeSnapshots": {
+        "RegionId": "cn-beijing",
+        "SnapshotIds": "[\"d-2zegzgvyco5xt964dto5\"]"
+      }
+    },
+    "regionId": "",
+    "snapshotId": "",
+    "secretRef":{
+      "namespace": "default",
+      "name": "aliyun-secret"
+    }
+  }
+}

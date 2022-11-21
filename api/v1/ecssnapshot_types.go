@@ -24,64 +24,53 @@ import (
 // EDIT THIS FILE!  THIS IS SCAFFOLDING FOR YOU TO OWN!
 // NOTE: json tags are required.  Any new fields you add must have json tags for the fields to be serialized.
 
-// VMInstanceSpec defines the desired state of VMInstance
-type VMInstanceSpec struct {
+// ECSSnapshotSpec defines the desired state of ECSSnapshot
+type ECSSnapshotSpec struct {
 	// INSERT ADDITIONAL SPEC FIELDS - desired state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	//instance info
 	// +kubebuilder:pruning:PreserveUnknownFields
 	Domain runtime.RawExtension `json:"domain,omitempty"`
 	//request to be executed
 	// +kubebuilder:pruning:PreserveUnknownFields
 	LifeCycle runtime.RawExtension `json:"lifeCycle,omitempty"`
-	//regionId and InstanceId, can't be empty
-	RegionId   string `json:"regionId"`
-	InstanceId string `json:"instanceId"`
-
-	//SrereteRef
+	//SecretRef
 	SecretRef SecretRef `json:"secretRef"`
-}
-type SecretRef struct {
-	//secretNamespace
-	Namespace string `json:"namespace"`
-	//secretName
-	Name string `json:"name"`
+	//metadata
+	SnapshotId string `json:"snapshotId"`
+	RegionId   string `json:"regionId"`
 }
 
-// VMInstanceStatus defines the observed state of VMInstance
-type VMInstanceStatus struct {
+// ECSSnapshotStatus defines the observed state of ECSSnapshot
+type ECSSnapshotStatus struct {
 	// INSERT ADDITIONAL STATUS FIELD - define observed state of cluster
 	// Important: Run "make" to regenerate code after modifying this file
-	// http request status
-	Status string `json:"status,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
-// +kubebuilder:print
-// VMInstance is the Schema for the vminstances API
-// +kubebuilder:printcolumn:name="InstanceId",type="string",JSONPath=".spec.domain.InstanceId",description="InstanceId"
-// +kubebuilder:printcolumn:name="RegionId",type="string",JSONPath=".spec.domain.RegionId",description="Region Id"
-// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".spec.domain.Status",description="HttpStatus"
-// +kubebuilder:printcolumn:name="InstanceType",type="string",JSONPath=".spec.domain.InstanceType",description="InstanceType"
-// +kubebuilder:printcolumn:name="ImageId",type="string",JSONPath=".spec.domain.ImageId",description="ImageId"
-type VMInstance struct {
+// +kubebuilder:printcolumn:name="SnapshotId",type="string",JSONPath=".spec.domain.SnapshotId",description="snapshot id"
+// +kubebuilder:printcolumn:name="SourceRegionId",type="string",JSONPath=".spec.domain.SourceRegionId",description="Sorce region Id"
+// +kubebuilder:printcolumn:name="Status",type="string",JSONPath=".spec.domain.Status",description="snapshot status"
+// +kubebuilder:printcolumn:name="SnapshotType",type="string",JSONPath=".spec.domain.SnapshotType",description="SnapshotType"
+// +kubebuilder:printcolumn:name="SnapshotName",type="string",JSONPath=".spec.domain.SnapshotName",description="SnapshotName"
+// ECSSnapshot is the Schema for the ecssnapshots API
+type ECSSnapshot struct {
 	metav1.TypeMeta   `json:",inline"`
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
-	Spec   VMInstanceSpec   `json:"spec,omitempty"`
-	Status VMInstanceStatus `json:"status,omitempty"`
+	Spec   ECSSnapshotSpec   `json:"spec,omitempty"`
+	Status ECSSnapshotStatus `json:"status,omitempty"`
 }
 
 //+kubebuilder:object:root=true
 
-// VMInstanceList contains a list of VMInstance
-type VMInstanceList struct {
+// ECSSnapshotList contains a list of ECSSnapshot
+type ECSSnapshotList struct {
 	metav1.TypeMeta `json:",inline"`
 	metav1.ListMeta `json:"metadata,omitempty"`
-	Items           []VMInstance `json:"items"`
+	Items           []ECSSnapshot `json:"items"`
 }
 
 func init() {
-	SchemeBuilder.Register(&VMInstance{}, &VMInstanceList{})
+	SchemeBuilder.Register(&ECSSnapshot{}, &ECSSnapshotList{})
 }

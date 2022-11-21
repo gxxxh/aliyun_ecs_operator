@@ -89,14 +89,26 @@ func main() {
 		os.Exit(1)
 	}
 
-	if err = (&controllers.VMInstanceReconciler{
-		Client:   mgr.GetClient(),
-		Scheme:   mgr.GetScheme(),
-		Log:      ctrl.Log.WithName("Controllers").WithName("VMInstance"),
-		Recorder: mgr.GetEventRecorderFor("VMInstance"),
-	}).SetupWithManager(mgr); err != nil {
-		setupLog.Error(err, "unable to create controller", "controller", "VMInstance")
-		os.Exit(1)
+	//if err = (&controllers.VMInstanceReconciler{
+	//	Client:   mgr.GetClient(),
+	//	Scheme:   mgr.GetScheme(),
+	//	Log:      ctrl.Log.WithName("Controllers").WithName(controllers.ALIYUN_ECS_INSTANCE),
+	//	Recorder: mgr.GetEventRecorderFor(controllers.ALIYUN_ECS_INSTANCE),
+	//}).SetupWithManager(mgr); err != nil {
+	//	setupLog.Error(err, "unable to create controller", "controller", "VMInstance")
+	//	os.Exit(1)
+	//}
+	for CrdName, CrdObject := range controllers.EmptyCrdObjects {
+		if err = (&controllers.VMInstanceReconciler{
+			Client:   mgr.GetClient(),
+			Kind:     CrdName,
+			Scheme:   mgr.GetScheme(),
+			Log:      ctrl.Log.WithName("Controllers").WithName(CrdName),
+			Recorder: mgr.GetEventRecorderFor(CrdName),
+		}).SetUpWithManagerCrd(mgr, CrdObject); err != nil {
+			setupLog.Error(err, "unable to create controller", "controller", "VMInstance")
+			os.Exit(1)
+		}
 	}
 	//+kubebuilder:scaffold:builder
 

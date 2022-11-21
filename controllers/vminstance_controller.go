@@ -19,14 +19,17 @@ package controllers
 import (
 	aliyunecsv1 "cloudOperator/api/v1"
 	"context"
-	"fmt"
+	"encoding/json"
 	"github.com/go-logr/logr"
 	"github.com/pkg/errors"
+	"github.com/tidwall/gjson"
+	"github.com/tidwall/sjson"
 	corev1 "k8s.io/api/core/v1"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	"k8s.io/apimachinery/pkg/runtime"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/client-go/tools/record"
+	"reflect"
 	ctrl "sigs.k8s.io/controller-runtime"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 )
@@ -34,6 +37,7 @@ import (
 // VMInstanceReconciler reconciles a VMInstance object
 type VMInstanceReconciler struct {
 	client.Client
+	Kind     string
 	Log      logr.Logger
 	Scheme   *runtime.Scheme
 	Recorder record.EventRecorder
@@ -53,26 +57,59 @@ type VMInstanceReconciler struct {
 //
 // For more details, check Reconcile and its Result here:
 // - https://pkg.go.dev/sigs.k8s.io/controller-runtime@v0.13.0/pkg/reconcile
+
+func (r *VMInstanceReconciler) GetCrdJsonFromK8s(ctx context.Context, req ctrl.Request) ([]byte, error) {
+	crd := reflect.New(reflect.TypeOf(EmptyCrdObjects[r.Kind]).Elem()).Interface().(client.Object)
+	if err := r.Get(ctx, req.NamespacedName, crd); err != nil {
+		if apierrors.IsNotFound(err) {
+			r.Log.Info("didn't find the object", "Req", req)
+			return nil, nil
+		}
+		r.Log.Error(err, "Get crd info error")
+		return nil, err
+	}
+	jsonBytes, err := json.Marshal(crd)
+	if err != nil {
+		return nil, errors.Wrap(err, "GetCrdJsonFromK8s.JsonMarshal:")
+	}
+	return jsonBytes, nil
+}
+
+func (r *VMInstanceReconciler) GetCrdOjbect(jsonBytes []byte) (client.Object, error) {
+	crd := reflect.New(reflect.TypeOf(EmptyCrdObjects[r.Kind]).Elem()).Interface().(client.Object)
+	err := json.Unmarshal(jsonBytes, crd)
+	if err != nil {
+		r.Log.Error(err, "Can't get runtime.Object from json")
+		return nil, err
+	}
+	return crd, nil
+}
+
 func (r *VMInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) (ctrl.Result, error) {
 	logger := r.Log
 	// TODO(user): your logic here
-	//获取对象
 	var (
-		err error
+		err          error
+		crdJsonBytes []byte
 	)
-	inst := &aliyunecsv1.VMInstance{}
-	if err = r.Get(ctx, req.NamespacedName, inst); err != nil {
-		if apierrors.IsNotFound(err) {
-			return ctrl.Result{}, nil
-		}
-		logger.Error(err, "Get Virtual machine error")
+	//get crd json
+	crdJsonBytes, err = r.GetCrdJsonFromK8s(ctx, req)
+	if err != nil || crdJsonBytes == nil {
 		return ctrl.Result{}, err
 	}
+
+	//get crd object, this object is using to update event
+	crdObject, err := r.GetCrdOjbect(crdJsonBytes)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+
 	//get secrets and init Service
+	//todo ,using get interface
 	secret := &corev1.Secret{}
-	if err = r.Get(ctx, client.ObjectKey{
-		Namespace: inst.Spec.SecretRef.Namespace,
-		Name:      inst.Spec.SecretRef.Name,
+	if err := r.Get(ctx, client.ObjectKey{
+		Namespace: gjson.GetBytes(crdJsonBytes, "spec.secretRef.namespace").String(),
+		Name:      gjson.GetBytes(crdJsonBytes, "spec.secretRef.name").String(),
 	}, secret); err != nil {
 		if apierrors.IsNotFound(err) {
 			logger.Error(err, "Not found secret to the cloud")
@@ -83,60 +120,77 @@ func (r *VMInstanceReconciler) Reconcile(ctx context.Context, req ctrl.Request) 
 	}
 
 	//init a executor to execute request
-	executor, err := NewExecutor(inst.Kind, secret.Data)
+	executor, err := NewExecutor(r.Kind, r.Log, secret.Data)
 	if err != nil {
 		logger.Error(err, "Init executor error")
 		return ctrl.Result{}, err
 	}
-
+	oldLifeCycle := gjson.GetBytes(crdJsonBytes, "spec.lifeCycle").String()
+	oldDomain := gjson.GetBytes(crdJsonBytes, "spec.domain").String()
 	// 无需处理
-	if (inst.Spec.LifeCycle.Raw == nil) || (inst.Spec.LifeCycle.Raw != nil && len(inst.Spec.LifeCycle.Raw) == 0) {
-		if (inst.Spec.Domain.Raw == nil) || (inst.Spec.Domain.Raw != nil && len(inst.Spec.Domain.Raw) == 0) {
-			//init
-			domain, err := executor.GetDomain(inst.Spec)
+	if oldLifeCycle == "" || oldLifeCycle == "{}" {
+		if oldDomain == "" || oldDomain == "{}" {
+			//加入k8s管理，初始为空
+
+			crdJsonBytes, err = executor.UpdateCrdDomain(crdJsonBytes)
 			if err != nil {
-				logger.Error(err, fmt.Sprintf("Get Domain info for %s error\n", inst.Kind))
+				return ctrl.Result{}, err
 			}
-			inst.Spec.Domain.Raw = domain
+			if err := r.UpdateCrd(ctx, crdJsonBytes); err != nil {
+				return ctrl.Result{}, err
+			}
 			logger.Info("Add Instance to kubernetes cluster, ", "Instance:", types.NamespacedName{
-				Namespace: inst.Namespace,
-				Name:      inst.Name,
+				Namespace: req.Namespace,
+				Name:      req.Name,
 			}.String())
-			r.Recorder.Event(inst, corev1.EventTypeNormal, "Add Instance to kubernetes cluster", inst.Kind)
+			r.Recorder.Event(crdObject, corev1.EventTypeNormal, "Add Instance to kubernetes cluster", r.Kind)
 		}
 		logger.Info("Instance lifecycle is empty", "Instance:", types.NamespacedName{
-			Namespace: inst.Namespace,
-			Name:      inst.Name,
+			Namespace: req.Namespace,
+			Name:      req.Name,
 		}.String())
 		return ctrl.Result{}, nil
 	}
 
 	//todo 执行结果写入到event中
 	//todo 测试cloudAPI的err
-	resp, err := executor.ServiceCall(inst.Spec.LifeCycle.Raw)
+	resp, err := executor.ServiceCall([]byte(oldLifeCycle))
 	if err != nil {
 		logger.Error(err, "call Cloud API Error")
-		r.Recorder.Event(inst, "Error", "Call Cloud API Error", err.Error())
+		r.Recorder.Event(crdObject, "Error", "Call Cloud API Error", err.Error())
 		return ctrl.Result{}, err
 	}
 	// succeed event
-	r.Recorder.Eventf(inst, corev1.EventTypeNormal, "Call Cloud API Succeed", "RequestInfo: %s, ResponseInfo: %s", string(inst.Spec.LifeCycle.Raw), string(resp))
-	// update
-	inst.Spec.LifeCycle.Raw = nil
-	domain, err := executor.GetDomain(inst.Spec)
+	r.Recorder.Eventf(crdObject, corev1.EventTypeNormal, "Call Cloud API Succeed", "RequestInfo: %s, ResponseInfo: %s", string(oldLifeCycle), string(resp))
+	// update spec to nil
+	crdJsonBytes, err = sjson.SetBytes(crdJsonBytes, "spec.lifeCycle", nil)
 	if err != nil {
-		logger.Error(err, fmt.Sprintf("Get Domain info for %s error\n", inst.Kind))
-		r.Recorder.Event(inst, "Error", "Get Cloud Resource's metadata error", err.Error())
-		return ctrl.Result{}, errors.Wrap(err, "Get Domain")
+		logger.Error(err, "Set Spec to nil error")
 	}
-	inst.Spec.Domain.Raw = domain
-	// write back
-	if err := r.Update(ctx, inst); err != nil {
-		r.Recorder.Event(inst, "Error", "Update Resource's Domain error", err.Error())
-		return ctrl.Result{}, errors.Wrap(err, "Update")
+	// update domain to new info
+	crdJsonBytes, err = executor.UpdateCrdDomain(crdJsonBytes)
+	if err != nil {
+		return ctrl.Result{}, err
+	}
+	if err := r.UpdateCrd(ctx, crdJsonBytes); err != nil {
+		return ctrl.Result{}, err
 	}
 	//todo 删除资源时，调用删除
 	return ctrl.Result{}, nil
+}
+
+func (r *VMInstanceReconciler) UpdateCrd(ctx context.Context, crdJsonBytes []byte) error {
+	crdObject, err := r.GetCrdOjbect(crdJsonBytes)
+	if err != nil {
+		r.Log.Error(err, "Can't get runtime.Object from json")
+		return err
+	}
+	if err := r.Update(ctx, crdObject); err != nil {
+		r.Log.Error(err, "Update Crd Info error")
+		r.Recorder.Event(crdObject, corev1.EventTypeWarning, "Update Resource's Domain error", err.Error())
+		return err
+	}
+	return nil
 }
 
 // SetupWithManager sets up the controller with the Manager.
@@ -144,4 +198,8 @@ func (r *VMInstanceReconciler) SetupWithManager(mgr ctrl.Manager) error {
 	return ctrl.NewControllerManagedBy(mgr).
 		For(&aliyunecsv1.VMInstance{}).
 		Complete(r)
+}
+
+func (r *VMInstanceReconciler) SetUpWithManagerCrd(mgr ctrl.Manager, emptyObject client.Object) error {
+	return ctrl.NewControllerManagedBy(mgr).For(emptyObject).Complete(r)
 }
